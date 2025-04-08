@@ -16,7 +16,7 @@ setor_filosofia = {
 
 # Funções de avaliação das filosofias
 def avaliar_value(d):
-    if d['pe_ratio'] < 15 and d['pb_ratio'] < 1.5:
+    if d['pe_ratio'] and d['pe_ratio'] < 15 and d['pb_ratio'] and d['pb_ratio'] < 1.5:
         return True, 'P/L < 15 e P/VP < 1.5 atendidos.'
     return False, 'Não atende critérios clássicos de valor (P/L ou P/VP altos).'
 
@@ -26,14 +26,33 @@ def avaliar_garp(d):
     return False, 'PEG acima de 1 (crescimento vs preço não equilibrado).'
 
 def avaliar_quality(d):
-    if d['roe'] and d['roe'] > 20 and d['profit_margin'] and d['profit_margin'] > 0.15:
+    if d['roe'] and d['roe'] > 0.20 and d['profit_margin'] and d['profit_margin'] > 0.15:
         return True, 'ROE > 20% e Margem líquida > 15%.'
     return False, 'Empresa não apresenta alta qualidade (ROE ou margem abaixo do ideal).'
 
 def avaliar_deep_value(d):
-    if d['pe_ratio'] < 6 and d['pb_ratio'] < 1:
+    if d['pe_ratio'] and d['pe_ratio'] < 6 and d['pb_ratio'] and d['pb_ratio'] < 1:
         return True, 'Múltiplos muito baixos (P/L < 6 e P/VP < 1).'
     return False, 'Não parece descontada o suficiente para Deep Value.'
+
+# Preço justo por filosofia
+def calcular_precos_justos(d):
+    lpa = d.get('eps')
+    vpa = d.get('book_value')
+    preco_atual = d.get('current_price')
+    crescimento = d.get('earnings_growth') or 0.12
+
+    precos = {}
+    if lpa and vpa:
+        precos['Value Investing'] = (22.5 * lpa * vpa) ** 0.5
+    if lpa:
+        precos['GARP'] = lpa * 15 * crescimento
+        precos['Quality Investing'] = lpa * 20
+    if vpa:
+        precos['Deep Value'] = vpa * 0.8
+
+    upsides = {k: ((v - preco_atual) / preco_atual) * 100 for k, v in precos.items()}
+    return precos, upsides
 
 # Coleta de dados com yfinance
 def get_dados_yahoo(ticker):
@@ -47,6 +66,10 @@ def get_dados_yahoo(ticker):
             'peg_ratio': info.get('pegRatio', None),
             'roe': info.get('returnOnEquity', None),
             'profit_margin': info.get('profitMargins', None),
+            'eps': info.get('trailingEps', None),
+            'book_value': info.get('bookValue', None),
+            'earnings_growth': info.get('earningsQuarterlyGrowth', None),
+            'current_price': info.get('currentPrice', None),
         }
     except Exception as e:
         return None
@@ -64,7 +87,6 @@ if st.button('Analisar'):
         recomendadas = setor_filosofia.get(setor, ['Value Investing'])
         st.markdown(f"**Filosofia(s) recomendada(s) para o setor:** {', '.join(recomendadas)}")
 
-        # Avaliação das filosofias
         st.subheader('Avaliação por Filosofia')
         avaliacoes = {
             'Value Investing': avaliar_value(dados),
@@ -79,6 +101,13 @@ if st.button('Analisar'):
             st.markdown(f"**{destaque} {nome}**: {status} - {comentario}")
 
         st.info("Filosofias com estrela são recomendadas para o setor do ativo analisado.")
+
+        st.subheader('Preço Justo por Filosofia')
+        precos, upsides = calcular_precos_justos(dados)
+        for nome, preco in precos.items():
+            upside = upsides[nome]
+            cor = 'green' if upside > 0 else 'red'
+            st.markdown(f"**{nome}**: Preço justo estimado: R$ {preco:.2f} | Atual: R$ {dados['current_price']:.2f} | <span style='color:{cor}'>Upside: {upside:.2f}%</span>", unsafe_allow_html=True)
     else:
         st.error('Erro ao buscar dados. Verifique o ticker.')
 
