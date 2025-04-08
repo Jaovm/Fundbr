@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
 
+st.set_page_config(layout='wide')
+
 # Dicionário de filosofias recomendadas por setor
 setor_filosofia = {
     'Energy': ['Deep Value', 'Dividend Investing'],
@@ -35,6 +37,11 @@ def avaliar_deep_value(d):
         return True, 'Múltiplos muito baixos (P/L < 6 e P/VP < 1).'
     return False, 'Não parece descontada o suficiente para Deep Value.'
 
+def avaliar_dividend(d):
+    if d['dividend_yield'] and d['dividend_yield'] > 0.05:
+        return True, f'Dividend Yield atrativo ({d["dividend_yield"]:.2%}).'
+    return False, 'Yield abaixo de 5%.'
+
 # Preço justo por filosofia
 def calcular_precos_justos(d):
     lpa = d.get('eps')
@@ -50,6 +57,9 @@ def calcular_precos_justos(d):
         precos['Quality Investing'] = lpa * 20
     if vpa:
         precos['Deep Value'] = vpa * 0.8
+    if d.get('dividend_yield'):
+        dividend = preco_atual * d['dividend_yield']
+        precos['Dividend Investing'] = dividend / 0.06  # Considera retorno-alvo de 6%
 
     upsides = {k: ((v - preco_atual) / preco_atual) * 100 for k, v in precos.items()}
     return precos, upsides
@@ -70,6 +80,7 @@ def get_dados_yahoo(ticker):
             'book_value': info.get('bookValue', None),
             'earnings_growth': info.get('earningsQuarterlyGrowth', None),
             'current_price': info.get('currentPrice', None),
+            'dividend_yield': info.get('dividendYield', None),
         }
     except Exception as e:
         return None
@@ -83,16 +94,24 @@ if st.button('Analisar'):
 
     if dados:
         setor = dados['setor']
-        st.subheader(f"Setor: {setor}")
         recomendadas = setor_filosofia.get(setor, ['Value Investing'])
-        st.markdown(f"**Filosofia(s) recomendada(s) para o setor:** {', '.join(recomendadas)}")
 
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader(f"Setor: {setor}")
+            st.markdown(f"**Filosofia(s) recomendada(s):** {', '.join(recomendadas)}")
+
+        with col2:
+            st.metric("Preço Atual", f"R$ {dados['current_price']:.2f}")
+
+        st.markdown("---")
         st.subheader('Avaliação por Filosofia')
         avaliacoes = {
             'Value Investing': avaliar_value(dados),
             'GARP': avaliar_garp(dados),
             'Quality Investing': avaliar_quality(dados),
             'Deep Value': avaliar_deep_value(dados),
+            'Dividend Investing': avaliar_dividend(dados)
         }
 
         for nome, (aprovado, comentario) in avaliacoes.items():
@@ -102,6 +121,7 @@ if st.button('Analisar'):
 
         st.info("Filosofias com estrela são recomendadas para o setor do ativo analisado.")
 
+        st.markdown("---")
         st.subheader('Preço Justo por Filosofia')
         precos, upsides = calcular_precos_justos(dados)
         for nome, preco in precos.items():
@@ -117,3 +137,5 @@ if st.button('Analisar'):
     st.markdown("**GARP (Growth at Reasonable Price)**: Combina crescimento com preço justo. Empresas com crescimento acima da média, mas sem exagero no valuation.")
     st.markdown("**Quality Investing**: Foco em empresas de alta qualidade, com ROE elevado, margens saudáveis e vantagem competitiva.")
     st.markdown("**Deep Value**: Procura ações extremamente descontadas, às vezes ignoradas pelo mercado, com múltiplos muito baixos e alto risco-retorno.")
+    st.markdown("**Dividend Investing**: Busca empresas que pagam bons dividendos de forma consistente, com foco em geração de renda passiva e estabilidade.")
+    
