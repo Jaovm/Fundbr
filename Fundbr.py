@@ -74,9 +74,10 @@ if ticker and api_key:
     info_yahoo, hist_yahoo = buscar_dados_yahoo(ticker)
     dados_fmp = buscar_dados_fmp(ticker.replace(".SA", ""), api_key)
 
+    perfil = dados_fmp.get("profile", [{}])[0] if dados_fmp.get("profile") else {}
+
     st.subheader("Resumo da Empresa")
-    if "profile" in dados_fmp and dados_fmp["profile"]:
-        perfil = dados_fmp["profile"][0]
+    if perfil:
         col1, col2 = st.columns(2)
         with col1:
             st.write(f"**Nome:** {perfil.get('companyName', '-')}")
@@ -102,7 +103,9 @@ if ticker and api_key:
     criterios["Lucro positivo nos últimos 20 trimestres"] = len(lucro_anos) >= 20
 
     # Critério 4: DY médio > 5%
-    dy = perfil.get("lastDiv", 0) / perfil.get("price", 1)
+    dy = 0
+    if perfil and perfil.get("price"):
+        dy = perfil.get("lastDiv", 0) / perfil.get("price", 1)
     criterios["Dividend Yield médio > 5%"] = dy > 0.05
 
     # Critério 5: ROE > 10%
@@ -115,11 +118,11 @@ if ticker and api_key:
 
     # Critério 7: Crescimento de receita nos últimos 5 anos
     receitas = [item['revenue'] for item in dados_fmp.get('income', [])[-5:]]
-    criterios["Crescimento de receita 5 anos"] = all(x < y for x, y in zip(receitas, receitas[1:]))
+    criterios["Crescimento de receita 5 anos"] = all(x < y for x, y in zip(receitas, receitas[1:])) if len(receitas) == 5 else False
 
     # Critério 8: Crescimento de lucros nos últimos 5 anos
     lucros = [item['netIncome'] for item in dados_fmp.get('income', [])[-5:]]
-    criterios["Crescimento de lucros 5 anos"] = all(x < y for x, y in zip(lucros, lucros[1:]))
+    criterios["Crescimento de lucros 5 anos"] = all(x < y for x, y in zip(lucros, lucros[1:])) if len(lucros) == 5 else False
 
     # Critério 9: Liquidez diária > 2 milhões
     media_volume = info_yahoo.get("averageDailyVolume10Day", 0) * info_yahoo.get("previousClose", 0)
@@ -129,7 +132,7 @@ if ticker and api_key:
     margens = [item.get("netProfitMargin", 0) for item in dados_fmp.get("ratios", [{}])] * 5
     criterios["Margem líquida estável ou crescente"] = all(x <= y for x, y in zip(margens, margens[1:]))
 
-    # Critério 11: ROIC > custo de capital (não disponível na versão gratuita da FMP)
+    # Critério 11: ROIC acima do custo de capital (não disponível na versão gratuita da FMP)
     criterios["ROIC acima do custo de capital"] = "(necessário plano pago ou cálculo manual)"
 
     for crit, status in criterios.items():
