@@ -111,3 +111,9 @@ if st.button('Analisar'):
     else:
         st.error('Erro ao buscar dados. Verifique o ticker.')
 
+    st.markdown("---")
+    st.markdown("### Resumo das Filosofias")
+    st.markdown("**Value Investing**: Busca empresas sólidas, com lucros consistentes e negociadas abaixo do valor intrínseco, usando múltiplos como P/L e P/VP.")
+    st.markdown("**GARP (Growth at Reasonable Price)**: Combina crescimento com preço justo. Empresas com crescimento acima da média, mas sem exagero no valuation.")
+    st.markdown("**Quality Investing**: Foco em empresas de alta qualidade, com ROE elevado, margens saudáveis e vantagem competitiva.")
+    st.markdown("**Deep Value**: Procura ações extremamente descontadas, às vezes ignoradas pelo mercado, com múltiplos muito baixos e alto risco-retorno.")
