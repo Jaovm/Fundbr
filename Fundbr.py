@@ -3,11 +3,15 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 import requests
+import datetime
 
 # Título
 titulo = "Análise Fundamentalista para Buy and Hold"
 st.set_page_config(page_title=titulo, layout="wide")
 st.title(titulo)
+
+# Campo para chave da API da Financial Modeling Prep
+api_key = st.text_input("Digite sua chave da API da Financial Modeling Prep (FMP):", type="password")
 
 # Checklist para ações Buy and Hold
 with st.expander("Checklist para ações Buy and Hold"):
@@ -43,44 +47,94 @@ ticker = st.text_input("Digite o ticker da ação (ex: WEGE3.SA):", "WEGE3.SA")
 
 @st.cache_data
 
-def buscar_dados(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        hist = stock.history(period="5y")
-        return info, hist
-    except:
-        return None, None
+def buscar_dados_yahoo(ticker):
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    hist = stock.history(period="5y")
+    return info, hist
 
-info, hist = buscar_dados(ticker)
+@st.cache_data
 
-if info:
+def buscar_dados_fmp(ticker_fmp, apikey):
+    base_url = f"https://financialmodelingprep.com/api/v3"
+    endpoints = {
+        "profile": f"{base_url}/profile/{ticker_fmp}?apikey={apikey}",
+        "income": f"{base_url}/income-statement/{ticker_fmp}?limit=20&apikey={apikey}",
+        "ratios": f"{base_url}/ratios-ttm/{ticker_fmp}?apikey={apikey}",
+        "quote": f"{base_url}/quote/{ticker_fmp}?apikey={apikey}"
+    }
+    dados = {}
+    for key, url in endpoints.items():
+        r = requests.get(url)
+        if r.status_code == 200:
+            dados[key] = r.json()
+    return dados
+
+if ticker and api_key:
+    info_yahoo, hist_yahoo = buscar_dados_yahoo(ticker)
+    dados_fmp = buscar_dados_fmp(ticker.replace(".SA", ""), api_key)
+
     st.subheader("Resumo da Empresa")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write(f"**Nome:** {info.get('longName', '-')}")
-        st.write(f"**Setor:** {info.get('sector', '-')}")
-        st.write(f"**Indústria:** {info.get('industry', '-')}")
-        st.write(f"**País:** {info.get('country', '-')}")
-    with col2:
-        st.write(f"**Dividend Yield:** {round(info.get('dividendYield', 0)*100, 2)}%")
-        st.write(f"**ROE:** {round(info.get('returnOnEquity', 0)*100, 2)}%")
-        st.write(f"**Margem Líquida:** {round(info.get('netMargins', 0)*100, 2)}%")
-        st.write(f"**Dívida/Patrimônio:** {round(info.get('debtToEquity', 0), 2)}")
+    if "profile" in dados_fmp and dados_fmp["profile"]:
+        perfil = dados_fmp["profile"][0]
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Nome:** {perfil.get('companyName', '-')}")
+            st.write(f"**Setor:** {perfil.get('sector', '-')}")
+            st.write(f"**Indústria:** {perfil.get('industry', '-')}")
+        with col2:
+            st.write(f"**País:** {perfil.get('country', '-')}")
+            st.write(f"**Preço atual:** US$ {perfil.get('price', '-')}")
+            st.write(f"**Beta:** {perfil.get('beta', '-')}")
 
     st.subheader("Checklist Automatizado - Critérios Financeiros")
-    checklist = {
-        "Mais de 5 anos na Bolsa": info.get("firstTradeDateEpochUtc", 0) < (pd.Timestamp.now().timestamp() - 5*365*24*60*60),
-        "Nunca deu prejuízo (ano fiscal)": info.get("profitMargins", 0) > 0,
-        "Dividend Yield médio > 5%": info.get("dividendYield", 0) > 0.05,
-        "ROE > 10%": info.get("returnOnEquity", 0) > 0.10,
-        "Dívida < Patrimônio": info.get("debtToEquity", 0) < 1,
-        "Margem Líquida positiva": info.get("netMargins", 0) > 0,
-        "Liquidez diária > US$ 2M": info.get("averageDailyVolume10Day", 0) * info.get("previousClose", 0) > 2_000_000
-    }
+    criterios = {}
 
-    for criterio, status in checklist.items():
-        st.write(f"- {'✅' if status else '❌'} {criterio}")
-else:
-    st.warning("Ticker inválido ou não encontrado.")
+    # Critério 1: Mais de 5 anos na bolsa
+    primeiro_ano = datetime.datetime.fromtimestamp(info_yahoo.get("firstTradeDateEpochUtc", datetime.datetime.now().timestamp())).year
+    criterios["Mais de 5 anos na Bolsa"] = primeiro_ano <= datetime.datetime.now().year - 5
+
+    # Critério 2: Nunca deu prejuízo em ano fiscal
+    lucro_anos = [item['netIncome'] for item in dados_fmp.get('income', []) if item['netIncome'] > 0]
+    criterios["Nunca deu prejuízo em ano fiscal"] = len(lucro_anos) == len(dados_fmp.get('income', []))
+
+    # Critério 3: Lucro positivo nos últimos 20 trimestres
+    criterios["Lucro positivo nos últimos 20 trimestres"] = len(lucro_anos) >= 20
+
+    # Critério 4: DY médio > 5%
+    dy = perfil.get("lastDiv", 0) / perfil.get("price", 1)
+    criterios["Dividend Yield médio > 5%"] = dy > 0.05
+
+    # Critério 5: ROE > 10%
+    roe = dados_fmp.get("ratios", [{}])[0].get("returnOnEquityTTM", 0)
+    criterios["ROE > 10%"] = roe > 0.10
+
+    # Critério 6: Dívida < Patrimônio
+    debt_ratio = dados_fmp.get("ratios", [{}])[0].get("debtEquityRatioTTM", 1)
+    criterios["Dívida < Patrimônio"] = debt_ratio < 1
+
+    # Critério 7: Crescimento de receita nos últimos 5 anos
+    receitas = [item['revenue'] for item in dados_fmp.get('income', [])[-5:]]
+    criterios["Crescimento de receita 5 anos"] = all(x < y for x, y in zip(receitas, receitas[1:]))
+
+    # Critério 8: Crescimento de lucros nos últimos 5 anos
+    lucros = [item['netIncome'] for item in dados_fmp.get('income', [])[-5:]]
+    criterios["Crescimento de lucros 5 anos"] = all(x < y for x, y in zip(lucros, lucros[1:]))
+
+    # Critério 9: Liquidez diária > 2 milhões
+    media_volume = info_yahoo.get("averageDailyVolume10Day", 0) * info_yahoo.get("previousClose", 0)
+    criterios["Liquidez diária > US$ 2M"] = media_volume > 2_000_000
+
+    # Critério 10: Margem líquida estável ou crescente
+    margens = [item.get("netProfitMargin", 0) for item in dados_fmp.get("ratios", [{}])] * 5
+    criterios["Margem líquida estável ou crescente"] = all(x <= y for x, y in zip(margens, margens[1:]))
+
+    # Critério 11: ROIC > custo de capital (não disponível na versão gratuita da FMP)
+    criterios["ROIC acima do custo de capital"] = "(necessário plano pago ou cálculo manual)"
+
+    for crit, status in criterios.items():
+        if isinstance(status, bool):
+            st.write(f"- {'✅' if status else '❌'} {crit}")
+        else:
+            st.write(f"- ❓ {crit}: {status}")
 
