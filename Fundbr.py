@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import matplotlib.pyplot as plt
+import requests
 
 # Título
 titulo = "Análise Fundamentalista para Buy and Hold"
@@ -9,6 +11,25 @@ st.title(titulo)
 
 # Input do usuário
 ticker = st.text_input("Digite o ticker da ação (ex: WEGE3.SA):", "WEGE3.SA")
+
+# Função para buscar médias do setor via API da Financial Modeling Prep
+def buscar_medias_setor(setor_nome):
+    try:
+        api_key = "7a2Rn70FJUAnnDH0EV4YmHIsrGMCPo95"
+        url = f"https://financialmodelingprep.com/api/v4/sector-performance?apikey={api_key}"
+        response = requests.get(url)
+        data = response.json()
+        for setor in data:
+            if setor_nome.lower() in setor['sector'].lower():
+                return {
+                    "ROE": setor.get("roe", 0),
+                    "Dividend Yield": setor.get("dividendYield", 0),
+                    "Margem Líquida": setor.get("netProfitMargin", 0),
+                    "Dívida/Patrimônio": setor.get("debtToEquity", 0),
+                    "P/L": setor.get("peRatio", 0)
+                }
+    except:
+        return None
 
 if ticker:
     acao = yf.Ticker(ticker)
@@ -47,12 +68,12 @@ if ticker:
         # Sugestões do mesmo setor
         st.subheader("Outras empresas do mesmo setor (sugestões)")
         sugestoes = {
-            "Tecnologia": ["TOTS3.SA", "LINX3.SA"],
-            "Energia": ["TAEE11.SA", "ENGI11.SA"],
-            "Financeiro": ["ITUB4.SA", "BBAS3.SA"],
-            "Consumo Cíclico": ["MGLU3.SA", "VIIA3.SA"],
-            "Indústria": ["WEGE3.SA", "EMBR3.SA"],
-            "Saúde": ["FLRY3.SA", "HAPV3.SA"]
+            "Technology": ["TOTS3.SA", "LINX3.SA"],
+            "Utilities": ["TAEE11.SA", "ENGI11.SA"],
+            "Financial Services": ["ITUB4.SA", "BBAS3.SA"],
+            "Consumer Cyclical": ["MGLU3.SA", "VIIA3.SA"],
+            "Industrials": ["WEGE3.SA", "EMBR3.SA"],
+            "Healthcare": ["FLRY3.SA", "HAPV3.SA"]
         }
 
         if setor in sugestoes:
@@ -61,5 +82,57 @@ if ticker:
         else:
             st.markdown("Setor não encontrado na base de sugestões.")
 
+        # Gráfico de crescimento histórico
+        st.subheader("Histórico de Preço - Últimos 5 anos")
+        hist = acao.history(period="5y")
+        st.line_chart(hist["Close"])
+
+        # Scorecard simplificado
+        st.subheader("Score Buy and Hold")
+        score = 0
+
+        if info.get("returnOnEquity", 0) > 0.10:
+            score += 1
+        if info.get("dividendYield", 0) > 0.05:
+            score += 1
+        if info.get("debtToEquity", 0) < 1:
+            score += 1
+        if info.get("netMargins", 0) > 0.1:
+            score += 1
+        if info.get("totalRevenue", 0) > 0:
+            score += 1
+        if info.get("netIncomeToCommon", 0) > 0:
+            score += 1
+
+        st.markdown(f"**Pontuação:** {score}/6 critérios atendidos")
+
+        # Comparativo com setor via API
+        st.subheader("Comparação com Média do Setor")
+        media_setor = buscar_medias_setor(setor)
+
+        if media_setor:
+            dados = {
+                "Indicador": ["ROE", "Dividend Yield", "Margem Líquida", "Dívida/Patrimônio", "P/L"],
+                "Empresa": [
+                    info.get("returnOnEquity", 0),
+                    info.get("dividendYield", 0),
+                    info.get("netMargins", 0),
+                    info.get("debtToEquity", 0),
+                    info.get("trailingPE", 0)
+                ],
+                "Média Setor": [
+                    media_setor["ROE"],
+                    media_setor["Dividend Yield"],
+                    media_setor["Margem Líquida"],
+                    media_setor["Dívida/Patrimônio"],
+                    media_setor["P/L"]
+                ]
+            }
+            df_comp = pd.DataFrame(dados)
+            st.dataframe(df_comp)
+        else:
+            st.warning("Não foi possível obter as médias do setor.")
+
     except Exception as e:
         st.error("Erro ao buscar dados da ação. Verifique o ticker e tente novamente.")
+
