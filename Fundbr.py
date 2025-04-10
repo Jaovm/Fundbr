@@ -1,141 +1,115 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 
-st.set_page_config(layout='wide')
-
-# Dicionário de filosofias recomendadas por setor
-setor_filosofia = {
-    'Energy': ['Deep Value', 'Dividend Investing'],
-    'Technology': ['Growth Investing', 'Quality Investing'],
-    'Financial Services': ['Value Investing', 'Dividend Investing'],
-    'Utilities': ['Dividend Investing', 'Value Investing'],
-    'Healthcare': ['Quality Investing', 'Growth Investing'],
-    'Consumer Defensive': ['Quality Investing', 'Value Investing'],
-    'Industrials': ['GARP', 'Value Investing'],
-    'Consumer Cyclical': ['GARP', 'Growth Investing'],
-    'Real Estate': ['Deep Value', 'Dividend Investing']
+# ===================== PARAMETROS GLOBAIS =====================
+TAXA_DESCONTO = 0.10
+CRESCIMENTO = 0.05
+YIELD_DESEJADO = 0.06
+MULTIPLOS_SETORIAIS = {
+    'finance': 8,
+    'tech': 20,
+    'utilities': 12,
+    'default': 15
 }
 
-# Funções de avaliação das filosofias
-def avaliar_value(d):
-    if d['pe_ratio'] and d['pe_ratio'] < 15 and d['pb_ratio'] and d['pb_ratio'] < 1.5:
-        return True, 'P/L < 15 e P/VP < 1.5 atendidos.'
-    return False, 'Não atende critérios clássicos de valor (P/L ou P/VP altos).'
+# ===================== FUNCOES DE VALUATION =====================
+def metodo_graham(lpa, crescimento):
+    return lpa * (8.5 + 2 * crescimento * 100)
 
-def avaliar_garp(d):
-    if d['peg_ratio'] and d['peg_ratio'] < 1:
-        return True, f'PEG < 1 ({d["peg_ratio"]:.2f}).'
-    return False, 'PEG acima de 1 (crescimento vs preço não equilibrado).'
+def metodo_bazin(dividendos_ano, yield_desejado=YIELD_DESEJADO):
+    return dividendos_ano / yield_desejado
 
-def avaliar_quality(d):
-    if d['roe'] and d['roe'] > 0.20 and d['profit_margin'] and d['profit_margin'] > 0.15:
-        return True, 'ROE > 20% e Margem líquida > 15%.'
-    return False, 'Empresa não apresenta alta qualidade (ROE ou margem abaixo do ideal).'
-
-def avaliar_deep_value(d):
-    if d['pe_ratio'] and d['pe_ratio'] < 6 and d['pb_ratio'] and d['pb_ratio'] < 1:
-        return True, 'Múltiplos muito baixos (P/L < 6 e P/VP < 1).'
-    return False, 'Não parece descontada o suficiente para Deep Value.'
-
-def avaliar_dividend(d):
-    if d['dividend_yield'] and d['dividend_yield'] > 0.05:
-        return True, f'Dividend Yield atrativo ({d["dividend_yield"]:.2%}).'
-    return False, 'Yield abaixo de 5%.'
-
-# Preço justo por filosofia
-def calcular_precos_justos(d):
-    lpa = d.get('eps')
-    vpa = d.get('book_value')
-    preco_atual = d.get('current_price')
-    crescimento = d.get('earnings_growth') or 0.12
-
-    precos = {}
-    if lpa and vpa:
-        precos['Value Investing'] = (22.5 * lpa * vpa) ** 0.5
-    if lpa:
-        precos['GARP'] = lpa * 15 * crescimento
-        precos['Quality Investing'] = lpa * 20
-    if vpa:
-        precos['Deep Value'] = vpa * 0.8
-    if d.get('dividend_yield'):
-        dividend = preco_atual * d['dividend_yield']
-        precos['Dividend Investing'] = dividend / 0.06  # Considera retorno-alvo de 6%
-
-    upsides = {k: ((v - preco_atual) / preco_atual) * 100 for k, v in precos.items()}
-    return precos, upsides
-
-# Coleta de dados com yfinance
-def get_dados_yahoo(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return {
-            'setor': info.get('sector', 'Desconhecido'),
-            'pe_ratio': info.get('trailingPE', None),
-            'pb_ratio': info.get('priceToBook', None),
-            'peg_ratio': info.get('pegRatio', None),
-            'roe': info.get('returnOnEquity', None),
-            'profit_margin': info.get('profitMargins', None),
-            'eps': info.get('trailingEps', None),
-            'book_value': info.get('bookValue', None),
-            'earnings_growth': info.get('earningsQuarterlyGrowth', None),
-            'current_price': info.get('currentPrice', None),
-            'dividend_yield': info.get('dividendYield', None),
-        }
-    except Exception as e:
+def metodo_ddm(dividendos_ano, crescimento, taxa_desconto=TAXA_DESCONTO):
+    if taxa_desconto <= crescimento:
         return None
+    return dividendos_ano / (taxa_desconto - crescimento)
 
-# Streamlit UI
-st.title('Análise de Filosofias de Valuation')
-ticker = st.text_input('Digite o ticker (ex: PETR4.SA, AAPL)', 'PETR4.SA')
+def metodo_valor_patrimonial(valor_patrimonial):
+    return valor_patrimonial
 
-if st.button('Analisar'):
-    dados = get_dados_yahoo(ticker)
+def metodo_multiplos(lpa, setor):
+    multiplicador = MULTIPLOS_SETORIAIS.get(setor.lower(), MULTIPLOS_SETORIAIS['default'])
+    return lpa * multiplicador
 
-    if dados:
-        setor = dados['setor']
-        recomendadas = setor_filosofia.get(setor, ['Value Investing'])
+def metodo_dcf(fcf_acao, crescimento, anos=5, taxa_desconto=TAXA_DESCONTO):
+    fcf_proj = [fcf_acao * ((1 + crescimento) ** i) for i in range(1, anos + 1)]
+    valor_presente = sum([fcf / ((1 + taxa_desconto) ** i) for i, fcf in enumerate(fcf_proj, 1)])
+    valor_terminal = fcf_proj[-1] * (1 + crescimento) / (taxa_desconto - crescimento)
+    return valor_presente + valor_terminal / ((1 + taxa_desconto) ** anos)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader(f"Setor: {setor}")
-            st.markdown(f"**Filosofia(s) recomendada(s):** {', '.join(recomendadas)}")
-
-        with col2:
-            st.metric("Preço Atual", f"R$ {dados['current_price']:.2f}")
-
-        st.markdown("---")
-        st.subheader('Avaliação por Filosofia')
-        avaliacoes = {
-            'Value Investing': avaliar_value(dados),
-            'GARP': avaliar_garp(dados),
-            'Quality Investing': avaliar_quality(dados),
-            'Deep Value': avaliar_deep_value(dados),
-            'Dividend Investing': avaliar_dividend(dados)
-        }
-
-        for nome, (aprovado, comentario) in avaliacoes.items():
-            status = '✔️ Atende' if aprovado else '❌ Não atende'
-            destaque = '⭐' if nome in recomendadas else ''
-            st.markdown(f"**{destaque} {nome}**: {status} - {comentario}")
-
-        st.info("Filosofias com estrela são recomendadas para o setor do ativo analisado.")
-
-        st.markdown("---")
-        st.subheader('Preço Justo por Filosofia')
-        precos, upsides = calcular_precos_justos(dados)
-        for nome, preco in precos.items():
-            upside = upsides[nome]
-            cor = 'green' if upside > 0 else 'red'
-            st.markdown(f"**{nome}**: Preço justo estimado: R$ {preco:.2f} | Atual: R$ {dados['current_price']:.2f} | <span style='color:{cor}'>Upside: {upside:.2f}%</span>", unsafe_allow_html=True)
+def sugestao_metodo(setor):
+    setor = setor.lower()
+    if 'finance' in setor:
+        return ['Valor Patrimonial', 'Múltiplos']
+    elif 'utilities' in setor:
+        return ['Bazin', 'DDM']
+    elif 'tech' in setor:
+        return ['DCF', 'Graham']
+    elif 'consumer' in setor or 'varejo' in setor:
+        return ['Múltiplos', 'Graham']
     else:
-        st.error('Erro ao buscar dados. Verifique o ticker.')
+        return ['Graham', 'Bazin']
 
-    st.markdown("---")
-    st.markdown("### Resumo das Filosofias")
-    st.markdown("**Value Investing**: Busca empresas sólidas, com lucros consistentes e negociadas abaixo do valor intrínseco, usando múltiplos como P/L e P/VP.")
-    st.markdown("**GARP (Growth at Reasonable Price)**: Combina crescimento com preço justo. Empresas com crescimento acima da média, mas sem exagero no valuation.")
-    st.markdown("**Quality Investing**: Foco em empresas de alta qualidade, com ROE elevado, margens saudáveis e vantagem competitiva.")
-    st.markdown("**Deep Value**: Procura ações extremamente descontadas, às vezes ignoradas pelo mercado, com múltiplos muito baixos e alto risco-retorno.")
-    st.markdown("**Dividend Investing**: Busca empresas que pagam bons dividendos de forma consistente, com foco em geração de renda passiva e estabilidade.")
-    
+def get_comparaveis_setor(setor, exclude_ticker):
+    tickers = ['ITUB4.SA', 'BBDC4.SA', 'PETR4.SA', 'VALE3.SA', 'WEGE3.SA', 'EGIE3.SA', 'VIVT3.SA']
+    dados = []
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).info
+            if info.get('sector', '').lower() == setor.lower() and t != exclude_ticker:
+                dados.append({
+                    'Ticker': t,
+                    'Setor': info.get('sector', ''),
+                    'LPA': info.get('trailingEps', 0),
+                    'Preço': info.get('currentPrice', 0),
+                    'P/L': info.get('currentPrice', 0) / info.get('trailingEps', 1)
+                })
+        except:
+            pass
+    return pd.DataFrame(dados)
+
+# ===================== INTERFACE =====================
+st.title("Valuation Automático de Ações")
+ticker_input = st.text_input("Digite o ticker da ação (ex: WEGE3.SA):")
+
+if ticker_input:
+    ticker = yf.Ticker(ticker_input)
+    info = ticker.info
+
+    setor = info.get('sector', 'Desconhecido')
+    preco = info.get('currentPrice', 0)
+    lpa = info.get('trailingEps', 0)
+    dividendos = info.get('dividendRate', 0)
+    dy = info.get('dividendYield', 0) or 0
+    patrimonio = info.get('bookValue', 0)
+    acoes = info.get('sharesOutstanding', 1)
+    fcf_total = info.get('freeCashflow', 0) or 0
+    fcf_acao = fcf_total / acoes if acoes > 0 else 0
+
+    st.subheader("Resultado do Valuation")
+    st.write("Setor:", setor)
+    st.write("Preço atual:", f"R$ {preco:.2f}")
+
+    resultados = {
+        'Graham': metodo_graham(lpa, CRESCIMENTO),
+        'Bazin': metodo_bazin(dividendos),
+        'DDM': metodo_ddm(dividendos, CRESCIMENTO),
+        'Valor Patrimonial': metodo_valor_patrimonial(patrimonio),
+        'Múltiplos (P/L Setorial)': metodo_multiplos(lpa, setor),
+        'DCF': metodo_dcf(fcf_acao, CRESCIMENTO)
+    }
+
+    for nome, valor in resultados.items():
+        if valor:
+            st.metric(label=nome, value=f"R$ {valor:.2f}", delta=f"{((valor - preco)/preco)*100:.2f}%")
+
+    st.write("\n**Métodos sugeridos para o setor:**", ", ".join(sugestao_metodo(setor)))
+
+    st.subheader("Análise de Múltiplos: Comparáveis do Setor")
+    comparaveis_df = get_comparaveis_setor(setor, ticker_input)
+    if not comparaveis_df.empty:
+        st.dataframe(comparaveis_df)
+    else:
+        st.write("Sem comparáveis encontrados ou setor não identificado.")
+        
