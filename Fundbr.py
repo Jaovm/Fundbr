@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 
-# ===================== AJUSTES DE PARÂMETROS POR SETOR =====================
+# ===================== PARAMETROS GLOBAIS =====================
 WACC_POR_SETOR = {
     'financial services': 0.11,
     'technology': 0.12,
@@ -36,16 +36,7 @@ RECOMENDACOES_POR_SETOR = {
     'default': ['Múltiplos (P/L)', 'Bazin']
 }
 
-# Métodos adicionais usados por investidores institucionais
-METODOS_INSTITUCIONAIS = {
-    'DCF (2 fases)': 'Fluxo de caixa descontado com duas fases de crescimento',
-    'Múltiplos (P/L)': 'Comparação com múltiplos setoriais ou históricos',
-    'Bazin': 'Baseado em dividend yield esperado',
-    'Patrimônio por Ação': 'Usado para setores financeiros ou empresas com ativos fortes',
-    'Análise de Sensibilidade': 'Testa diferentes premissas no DCF',
-    'Avaliação por EVA': 'Valor Econômico Adicionado, compara retorno com custo de capital'
-}
-
+# ===================== AJUSTES POR SETOR =====================
 def ajustar_taxa_desconto(setor):
     return WACC_POR_SETOR.get(setor.lower(), WACC_POR_SETOR['default'])
 
@@ -58,7 +49,7 @@ def ajustar_multiplo(setor):
 def sugestao_metodo(setor):
     return RECOMENDACOES_POR_SETOR.get(setor.lower(), RECOMENDACOES_POR_SETOR['default'])
 
-# ===================== MÉTODOS DE VALUATION =====================
+# ===================== METODOS DE VALUATION =====================
 def dcf_duas_fases(fcf, crescimento_inicial, crescimento_perpetuo, anos, wacc):
     fcf_proj = [fcf * ((1 + crescimento_inicial) ** i) for i in range(1, anos + 1)]
     valor_presente = sum([fcf / ((1 + wacc) ** i) for i, fcf in enumerate(fcf_proj, 1)])
@@ -71,6 +62,9 @@ def metodo_multiplo_eps(eps, setor):
 
 def metodo_bazin(dividendos_ano, setor):
     return dividendos_ano / ajustar_yield(setor)
+
+def calcular_preco_teto(preco_justo, margem=0.25):
+    return preco_justo / (1 + margem)
 
 # ===================== COLETA DE DADOS =====================
 def get_dados(ticker):
@@ -97,7 +91,7 @@ def get_dados(ticker):
     }
 
 # ===================== STREAMLIT APP =====================
-st.title("Valuation Profissional de Ações")
+st.title("Valuation Profissional Institucional")
 
 ticker = st.text_input("Ticker da ação (ex: WEGE3.SA):")
 if ticker:
@@ -108,28 +102,37 @@ if ticker:
     crescimento = dados['crescimento']
     crescimento_perp = crescimento / 2
 
+    preco_justo = dcf_duas_fases(dados['fcf_acao'], crescimento, crescimento_perp, 5, taxa_desconto)
+    preco_teto = calcular_preco_teto(preco_justo, margem=0.25)
+
     resultados = {
-        'DCF (2 fases)': dcf_duas_fases(dados['fcf_acao'], crescimento, crescimento_perp, 5, taxa_desconto),
+        'DCF (2 fases)': preco_justo,
+        'Preço Teto (25% margem)': preco_teto,
         'Múltiplos (P/L)': metodo_multiplo_eps(dados['lpa'], setor),
         'Bazin': metodo_bazin(dados['dividendos'], setor),
-        'Patrimônio por Ação': dados['patrimonio'],
+        'Patrimônio por Ação': dados['patrimonio']
     }
 
-    st.subheader("📊 Resultados do Valuation")
+    st.subheader("📊 Valuation Institucional")
     st.write(f"**Setor**: {setor}")
     st.write(f"**Preço Atual**: R$ {preco_atual:.2f}")
 
-    for metodo, preco_justo in resultados.items():
-        if preco_justo:
-            st.metric(metodo, f"R$ {preco_justo:.2f}")
+    for metodo, preco_calc in resultados.items():
+        if preco_calc:
+            st.metric(metodo, f"R$ {preco_calc:.2f}")
 
     if dados['target_price']:
         st.write(f"**Preço Alvo Médio (Analistas)**: R$ {dados['target_price']:.2f}")
 
-    st.subheader("🔎 Indicadores Recomendados para o Setor")
+    st.subheader("📌 Indicadores Recomendados para o Setor")
     recomendados = sugestao_metodo(setor)
     st.write(", ".join(recomendados))
 
-    st.subheader("📚 Métodos Utilizados por Investidores Institucionais")
-    for metodo, explicacao in METODOS_INSTITUCIONAIS.items():
-        st.write(f"- **{metodo}**: {explicacao}")
+    st.subheader("📚 Métodos Institucionais Usados")
+    st.markdown("""
+    - **DCF (2 Fases):** fluxo de caixa com crescimento projetado + perpetuidade com WACC setorial.
+    - **Preço Teto:** preço máximo com margem de segurança de 25% sobre o fair value.
+    - **Múltiplos (P/L):** média setorial ajustada ao lucro da empresa.
+    - **Bazin:** valor baseado em dividendos e yield mínimo do setor.
+    - **Valor Patrimonial:** importante para setores financeiros e empresas com muitos ativos físicos.
+    """)
