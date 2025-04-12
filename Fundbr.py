@@ -1,46 +1,54 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 
-# ===================== PARAMETROS GLOBAIS =====================
-TAXA_DESCONTO = 0.10
-CRESCIMENTO = 5  # Crescimento em %
-YIELD_DESEJADO = 0.06
-MULTIPLOS_SETORIAIS = {
-    'finance': 8,
-    'tech': 20,
-    'utilities': 12,
-    'default': 15
-}
+# ===================== FUNÇÕES DE PARAMETRIZAÇÃO AUTOMÁTICA =====================
+def get_taxa_desconto(setor):
+    if 'finance' in setor.lower():
+        return 0.12
+    elif 'utilities' in setor.lower():
+        return 0.08
+    elif 'tech' in setor.lower():
+        return 0.11
+    else:
+        return 0.10
 
-# ===================== FUNCOES DE VALUATION =====================
+def get_crescimento(info):
+    crescimento = info.get('earningsGrowth', 0.05)
+    return crescimento if crescimento else 0.05
+
+def get_yield_desejado(info):
+    dy_medio = info.get('fiveYearAvgDividendYield', 0.05)
+    return dy_medio + 0.01
+
+def get_multiplo_setorial(setor, exclude_ticker):
+    comparaveis = get_comparaveis_setor(setor, exclude_ticker)
+    if not comparaveis.empty:
+        return comparaveis['P/L'].mean()
+    return 15
+
+# ===================== FUNÇÕES DE VALUATION =====================
 def metodo_graham(lpa, crescimento):
-    return lpa * (8.5 + 2 * crescimento)
+    return lpa * (8.5 + 2 * crescimento * 100)
 
-def metodo_bazin(dividendos_ano, yield_desejado=YIELD_DESEJADO):
-    return dividendos_ano / yield_desejado if dividendos_ano else None
+def metodo_bazin(dividendos_ano, yield_desejado):
+    return dividendos_ano / yield_desejado
 
-def metodo_ddm(dividendos_ano, crescimento, taxa_desconto=TAXA_DESCONTO):
-    g = crescimento / 100
-    if taxa_desconto <= g or not dividendos_ano:
+def metodo_ddm(dividendos_ano, crescimento, taxa_desconto):
+    if taxa_desconto <= crescimento:
         return None
-    return dividendos_ano / (taxa_desconto - g)
+    return dividendos_ano / (taxa_desconto - crescimento)
 
 def metodo_valor_patrimonial(valor_patrimonial):
-    return valor_patrimonial if valor_patrimonial else None
+    return valor_patrimonial
 
-def metodo_multiplos(lpa, setor):
-    if not lpa:
-        return None
-    multiplicador = MULTIPLOS_SETORIAIS.get(setor.lower(), MULTIPLOS_SETORIAIS['default'])
-    return lpa * multiplicador
+def metodo_multiplos(lpa, multiplo):
+    return lpa * multiplo
 
-def metodo_dcf(fcf_acao, crescimento, anos=5, taxa_desconto=TAXA_DESCONTO):
-    if not fcf_acao:
-        return None
-    g = crescimento / 100
-    fcf_proj = [fcf_acao * ((1 + g) ** i) for i in range(1, anos + 1)]
+def metodo_dcf(fcf_acao, crescimento, anos, taxa_desconto):
+    fcf_proj = [fcf_acao * ((1 + crescimento) ** i) for i in range(1, anos + 1)]
     valor_presente = sum([fcf / ((1 + taxa_desconto) ** i) for i, fcf in enumerate(fcf_proj, 1)])
-    valor_terminal = fcf_proj[-1] * (1 + g) / (taxa_desconto - g)
+    valor_terminal = fcf_proj[-1] * (1 + crescimento) / (taxa_desconto - crescimento)
     return valor_presente + valor_terminal / ((1 + taxa_desconto) ** anos)
 
 def sugestao_metodo(setor):
@@ -55,6 +63,24 @@ def sugestao_metodo(setor):
         return ['Múltiplos', 'Graham']
     else:
         return ['Graham', 'Bazin']
+
+def get_comparaveis_setor(setor, exclude_ticker):
+    tickers = ['ITUB4.SA', 'BBDC4.SA', 'PETR4.SA', 'VALE3.SA', 'WEGE3.SA', 'EGIE3.SA', 'VIVT3.SA']
+    dados = []
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).info
+            if info.get('sector', '').lower() == setor.lower() and t != exclude_ticker:
+                dados.append({
+                    'Ticker': t,
+                    'Setor': info.get('sector', ''),
+                    'LPA': info.get('trailingEps', 0),
+                    'Preço': info.get('currentPrice', 0),
+                    'P/L': info.get('currentPrice', 0) / info.get('trailingEps', 1)
+                })
+        except:
+            pass
+    return pd.DataFrame(dados)
 
 def get_fundamentals(ticker):
     stock = yf.Ticker(ticker)
@@ -75,17 +101,11 @@ def get_fundamentals(ticker):
 
     return pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector
 
-def calculate_fair_price(pe_ratio, pb_ratio, eps, roe, setor, fcf_acao):
-    # Cálculo do preço justo por múltiplos (P/L ou P/B)
-    if setor == "Financial Services" and pb_ratio and roe:
-        # Para setor financeiro, usamos o P/B multiplicado pelo ROE
+def calculate_fair_price(sector, pe_ratio, pb_ratio, eps, roe):
+    if sector == "Financial Services" and pb_ratio and roe:
         return pb_ratio * roe * 10
     elif pe_ratio and eps:
-        # Para outros setores, usamos P/L * EPS
         return pe_ratio * eps
-    elif fcf_acao:
-        # Para empresas em crescimento, o DCF pode ser a melhor opção
-        return metodo_dcf(fcf_acao, CRESCIMENTO)
     return None
 
 # ===================== INTERFACE =====================
@@ -97,57 +117,60 @@ if ticker_input:
     info = ticker.info
 
     setor = info.get('sector', 'Desconhecido')
-    preco = info.get('currentPrice') or 0
-    lpa = info.get('trailingEps') or 0
-    dividendos = info.get('dividendRate') or 0
-    dy = info.get('dividendYield') or 0
-    patrimonio = info.get('bookValue') or 0
-    acoes = info.get('sharesOutstanding') or 1
-    fcf_total = info.get('freeCashflow') or 0
+    preco = info.get('currentPrice', 0)
+    lpa = info.get('trailingEps', 0)
+    dividendos = info.get('dividendRate', 0)
+    patrimonio = info.get('bookValue', 0)
+    acoes = info.get('sharesOutstanding', 1)
+    fcf_total = info.get('freeCashflow', 0) or 0
     fcf_acao = fcf_total / acoes if acoes > 0 else 0
+
+    taxa_desconto = get_taxa_desconto(setor)
+    crescimento = get_crescimento(info)
+    yield_desejado = get_yield_desejado(info)
+    multiplo_setorial = get_multiplo_setorial(setor, ticker_input)
 
     st.subheader("Resultado do Valuation")
     st.write("Setor:", setor)
     st.write("Preço atual:", f"R$ {preco:.2f}")
 
-    resultados = {}
+    resultados = {
+        'Graham': metodo_graham(lpa, crescimento),
+        'Bazin': metodo_bazin(dividendos, yield_desejado),
+        'DDM': metodo_ddm(dividendos, crescimento, taxa_desconto),
+        'Valor Patrimonial': metodo_valor_patrimonial(patrimonio),
+        'Múltiplos (P/L Setorial)': metodo_multiplos(lpa, multiplo_setorial),
+        'DCF': metodo_dcf(fcf_acao, crescimento, anos=5, taxa_desconto=taxa_desconto)
+    }
 
-    # Calcular os resultados usando diferentes métodos
-    if lpa:
-        resultados['Graham'] = metodo_graham(lpa, CRESCIMENTO)
-        resultados['Múltiplos (P/L Setorial)'] = metodo_multiplos(lpa, setor)
-
-    if dividendos:
-        resultados['Bazin'] = metodo_bazin(dividendos)
-        resultados['DDM'] = metodo_ddm(dividendos, CRESCIMENTO)
-
-    if patrimonio:
-        resultados['Valor Patrimonial'] = metodo_valor_patrimonial(patrimonio)
-
-    if fcf_acao:
-        resultados['DCF'] = metodo_dcf(fcf_acao, CRESCIMENTO)
-
-    # Cálculo do Preço Justo
-    pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector_fair = get_fundamentals(ticker_input)
-    fair_price = calculate_fair_price(pe_ratio, pb_ratio, eps, eps_growth, setor, fcf_acao)
-
-    st.write("\n**Preço Justo Estimado (Resultado Final):**", f"R$ {fair_price:.2f}" if fair_price else 'Não disponível')
-
-    # Exibição das métricas
     for nome, valor in resultados.items():
         if valor:
             st.metric(label=nome, value=f"R$ {valor:.2f}", delta=f"{((valor - preco)/preco)*100:.2f}%")
 
     st.write("\n**Métodos sugeridos para o setor:**", ", ".join(sugestao_metodo(setor)))
 
-    # Cálculo do Upside/Downside com base no preço alvo médio
-    target_mean_price = target_mean_price or 0
-    upside_downside = ((target_mean_price - preco) / preco) * 100 if target_mean_price else None
+    st.subheader("Análise de Múltiplos: Comparáveis do Setor")
+    comparaveis_df = get_comparaveis_setor(setor, ticker_input)
+    if not comparaveis_df.empty:
+        st.dataframe(comparaveis_df)
+    else:
+        st.write("Sem comparáveis encontrados ou setor não identificado.")
 
-    if upside_downside is not None:
-        if upside_downside > 0:
-            st.write(f"\n**Upside (Potencial de valorização):** {upside_downside:.2f}%")
-        else:
-            st.write(f"\n**Downside (Risco de desvalorização):** {abs(upside_downside):.2f}%")
+    st.subheader("Preço Teto / Precificação Alternativa")
+    pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector_fair = get_fundamentals(ticker_input)
+    fair_price = calculate_fair_price(sector_fair, pe_ratio, pb_ratio, eps, pe_ratio)
+
+    st.write(f"Setor: {sector_fair if sector_fair else 'Não disponível'}")
+    st.write(f"Preço Justo Estimado: {fair_price if fair_price else 'Não disponível'}")
+    st.write(f"Preço Atual: {current_price}")
+    st.write(f"P/E Ratio: {pe_ratio}")
+    st.write(f"P/B Ratio: {pb_ratio}")
+    st.write(f"EPS: {eps}")
+    st.write(f"Crescimento EPS: {eps_growth}%")
+    st.write(f"Market Cap: {market_cap}")
+    st.write(f"Dividend Yield: {dividend_yield}")
+
+    if target_mean_price:
+        st.write(f"\n**Preço alvo médio dos analistas:** R$ {target_mean_price:.2f}")
     else:
         st.write("\n**Preço alvo médio não disponível.**")
