@@ -1,7 +1,5 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
-import matplotlib.pyplot as plt
 
 # ===================== PARAMETROS GLOBAIS =====================
 TAXA_DESCONTO = 0.10
@@ -57,27 +55,6 @@ def sugestao_metodo(setor):
         return ['Múltiplos', 'Graham']
     else:
         return ['Graham', 'Bazin']
-
-def get_comparaveis_setor(setor, exclude_ticker):
-    tickers = ['ITUB4.SA', 'BBDC4.SA', 'PETR4.SA', 'VALE3.SA', 'WEGE3.SA', 'EGIE3.SA', 'VIVT3.SA']
-    dados = []
-    for t in tickers:
-        try:
-            info = yf.Ticker(t).info
-            if info.get('sector', '').lower() == setor.lower() and t != exclude_ticker:
-                eps = info.get('trailingEps') or 0
-                preco = info.get('currentPrice') or 0
-                pl = preco / eps if eps else None
-                dados.append({
-                    'Ticker': t,
-                    'Setor': info.get('sector', ''),
-                    'LPA': eps,
-                    'Preço': preco,
-                    'P/L': pl
-                })
-        except:
-            pass
-    return pd.DataFrame(dados)
 
 def get_fundamentals(ticker):
     stock = yf.Ticker(ticker)
@@ -163,13 +140,14 @@ if ticker_input:
 
     st.write("\n**Métodos sugeridos para o setor:**", ", ".join(sugestao_metodo(setor)))
 
-    # Gráfico de comparação
-    st.subheader("Comparação de Preços")
-    labels = ['Preço Atual', 'Preço Justo Estimado', 'Preço Alvo Médio']
-    values = [preco, fair_price or 0, target_mean_price or 0]
+    # Cálculo do Upside/Downside com base no preço alvo médio
+    target_mean_price = target_mean_price or 0
+    upside_downside = ((target_mean_price - preco) / preco) * 100 if target_mean_price else None
 
-    fig, ax = plt.subplots()
-    ax.bar(labels, values, color=['blue', 'green', 'orange'])
-    ax.set_ylabel('Valor (R$)')
-    ax.set_title('Comparação de Preços de Ação')
-    st.pyplot(fig)
+    if upside_downside is not None:
+        if upside_downside > 0:
+            st.write(f"\n**Upside (Potencial de valorização):** {upside_downside:.2f}%")
+        else:
+            st.write(f"\n**Downside (Risco de desvalorização):** {abs(upside_downside):.2f}%")
+    else:
+        st.write("\n**Preço alvo médio não disponível.**")
