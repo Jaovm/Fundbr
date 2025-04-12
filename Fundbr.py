@@ -98,11 +98,17 @@ def get_fundamentals(ticker):
 
     return pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector
 
-def calculate_fair_price(sector, pe_ratio, pb_ratio, eps, roe):
-    if sector == "Financial Services" and pb_ratio and roe:
+def calculate_fair_price(pe_ratio, pb_ratio, eps, roe, setor, fcf_acao):
+    # Cálculo do preço justo por múltiplos (P/L ou P/B)
+    if setor == "Financial Services" and pb_ratio and roe:
+        # Para setor financeiro, usamos o P/B multiplicado pelo ROE
         return pb_ratio * roe * 10
     elif pe_ratio and eps:
+        # Para outros setores, usamos P/L * EPS
         return pe_ratio * eps
+    elif fcf_acao:
+        # Para empresas em crescimento, o DCF pode ser a melhor opção
+        return metodo_dcf(fcf_acao, CRESCIMENTO)
     return None
 
 # ===================== INTERFACE =====================
@@ -129,6 +135,7 @@ if ticker_input:
 
     resultados = {}
 
+    # Calcular os resultados usando diferentes métodos
     if lpa:
         resultados['Graham'] = metodo_graham(lpa, CRESCIMENTO)
         resultados['Múltiplos (P/L Setorial)'] = metodo_multiplos(lpa, setor)
@@ -143,33 +150,18 @@ if ticker_input:
     if fcf_acao:
         resultados['DCF'] = metodo_dcf(fcf_acao, CRESCIMENTO)
 
+    # Cálculo do Preço Justo
+    pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector_fair = get_fundamentals(ticker_input)
+    fair_price = calculate_fair_price(pe_ratio, pb_ratio, eps, eps_growth, setor, fcf_acao)
+
+    st.write("\n**Preço Justo Estimado (Resultado Final):**", f"R$ {fair_price:.2f}" if fair_price else 'Não disponível')
+
+    # Exibição das métricas
     for nome, valor in resultados.items():
         if valor:
             st.metric(label=nome, value=f"R$ {valor:.2f}", delta=f"{((valor - preco)/preco)*100:.2f}%")
 
     st.write("\n**Métodos sugeridos para o setor:**", ", ".join(sugestao_metodo(setor)))
-
-    st.subheader("Análise de Múltiplos: Comparáveis do Setor")
-    comparaveis_df = get_comparaveis_setor(setor, ticker_input)
-    if not comparaveis_df.empty:
-        st.dataframe(comparaveis_df)
-    else:
-        st.write("Sem comparáveis encontrados ou setor não identificado.")
-
-    st.subheader("Preço Teto / Precificação Alternativa")
-    pe_ratio, pb_ratio, eps, eps_growth, market_cap, current_price, dividend_yield, target_mean_price, sector_fair = get_fundamentals(ticker_input)
-    fair_price = calculate_fair_price(sector_fair, pe_ratio, pb_ratio, eps, pe_ratio)
-
-    st.write(f"Setor: {sector_fair if sector_fair else 'Não disponível'}")
-    st.write(f"Preço Justo Estimado: {fair_price if fair_price else 'Não disponível'}")
-    st.write(f"Preço Atual: {current_price}")
-    st.write(f"P/E Ratio: {pe_ratio}")
-    st.write(f"P/B Ratio: {pb_ratio}")
-    st.write(f"EPS: {eps}")
-    st.write(f"Crescimento EPS: {eps_growth}%")
-    st.write(f"Market Cap: {market_cap}")
-    st.write(f"Dividend Yield: {dividend_yield}")
-    st.write(f"Preço Alvo Médio (analistas - fonte: Yahoo Finance): {target_mean_price}")
 
     # Gráfico de comparação
     st.subheader("Comparação de Preços")
