@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # ===================== PARAMETROS GLOBAIS =====================
 TAXA_DESCONTO = 0.10
@@ -169,3 +170,14 @@ if ticker_input:
     st.write(f"Market Cap: {market_cap}")
     st.write(f"Dividend Yield: {dividend_yield}")
     st.write(f"Preço Alvo Médio (analistas - fonte: Yahoo Finance): {target_mean_price}")
+
+    # Gráfico de comparação
+    st.subheader("Comparação de Preços")
+    labels = ['Preço Atual', 'Preço Justo Estimado', 'Preço Alvo Médio']
+    values = [preco, fair_price or 0, target_mean_price or 0]
+
+    fig, ax = plt.subplots()
+    ax.bar(labels, values, color=['blue', 'green', 'orange'])
+    ax.set_ylabel('Valor (R$)')
+    ax.set_title('Comparação de Preços de Ação')
+    st.pyplot(fig)
