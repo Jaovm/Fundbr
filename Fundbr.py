@@ -1,8 +1,7 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 
-# ===================== UTILITÁRIOS DE AJUSTE DINÂMICO =====================
+# ===================== AJUSTES DE PARÂMETROS POR SETOR =====================
 WACC_POR_SETOR = {
     'financial services': 0.11,
     'technology': 0.12,
@@ -28,6 +27,15 @@ PL_SETORIAL = {
     'default': 15
 }
 
+RECOMENDACOES_POR_SETOR = {
+    'financial services': ['Patrimônio por Ação', 'Múltiplos (P/L)'],
+    'technology': ['DCF (2 fases)', 'Múltiplos (P/L)'],
+    'utilities': ['Bazin', 'DCF (2 fases)'],
+    'consumer defensive': ['Múltiplos (P/L)', 'Bazin'],
+    'energy': ['DCF (2 fases)', 'Múltiplos (P/L)'],
+    'default': ['Múltiplos (P/L)', 'Bazin']
+}
+
 def ajustar_taxa_desconto(setor):
     return WACC_POR_SETOR.get(setor.lower(), WACC_POR_SETOR['default'])
 
@@ -36,6 +44,9 @@ def ajustar_yield(setor):
 
 def ajustar_multiplo(setor):
     return PL_SETORIAL.get(setor.lower(), PL_SETORIAL['default'])
+
+def sugestao_metodo(setor):
+    return RECOMENDACOES_POR_SETOR.get(setor.lower(), RECOMENDACOES_POR_SETOR['default'])
 
 # ===================== MÉTODOS DE VALUATION =====================
 def dcf_duas_fases(fcf, crescimento_inicial, crescimento_perpetuo, anos, wacc):
@@ -58,7 +69,6 @@ def get_dados(ticker):
     preco = info.get('currentPrice', 0)
     lpa = info.get('trailingEps', 0)
     dividendos = info.get('dividendRate', 0)
-    dy = info.get('dividendYield') or 0
     patrimonio = info.get('bookValue', 0)
     acoes = info.get('sharesOutstanding', 1)
     fcf_total = info.get('freeCashflow', 0) or 0
@@ -70,35 +80,42 @@ def get_dados(ticker):
         'preco': preco,
         'lpa': lpa,
         'dividendos': dividendos,
-        'dy': dy,
         'patrimonio': patrimonio,
         'fcf_acao': fcf_acao,
         'crescimento': crescimento,
         'target_price': target_price
     }
 
-# ===================== INTERFACE STREAMLIT =====================
+# ===================== STREAMLIT APP =====================
 st.title("Valuation Profissional de Ações")
 
 ticker = st.text_input("Ticker da ação (ex: WEGE3.SA):")
 if ticker:
     dados = get_dados(ticker)
     setor = dados['setor']
+    preco_atual = dados['preco']
     taxa_desconto = ajustar_taxa_desconto(setor)
     crescimento = dados['crescimento']
     crescimento_perp = crescimento / 2
 
     resultados = {
         'DCF (2 fases)': dcf_duas_fases(dados['fcf_acao'], crescimento, crescimento_perp, 5, taxa_desconto),
-        'Múltiplos (P/L Setorial)': metodo_multiplo_eps(dados['lpa'], setor),
+        'Múltiplos (P/L)': metodo_multiplo_eps(dados['lpa'], setor),
         'Bazin': metodo_bazin(dados['dividendos'], setor),
         'Patrimônio por Ação': dados['patrimonio'],
     }
 
-    st.subheader("Resultados do Valuation:")
+    st.subheader("📊 Resultados do Valuation")
+    st.write(f"**Setor**: {setor}")
+    st.write(f"**Preço Atual**: R$ {preco_atual:.2f}")
+
     for metodo, preco_justo in resultados.items():
         if preco_justo:
             st.metric(metodo, f"R$ {preco_justo:.2f}")
 
     if dados['target_price']:
         st.write(f"**Preço Alvo Médio (Analistas)**: R$ {dados['target_price']:.2f}")
+
+    st.subheader("🔎 Indicadores Recomendados para o Setor")
+    recomendados = sugestao_metodo(setor)
+    st.write(", ".join(recomendados))
