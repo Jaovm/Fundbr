@@ -4,7 +4,7 @@ import pandas as pd
 
 # ===================== PARAMETROS GLOBAIS =====================
 TAXA_DESCONTO = 0.10
-CRESCIMENTO = 0.05
+CRESCIMENTO = 5  # Crescimento em %
 YIELD_DESEJADO = 0.06
 MULTIPLOS_SETORIAIS = {
     'finance': 8,
@@ -15,27 +15,33 @@ MULTIPLOS_SETORIAIS = {
 
 # ===================== FUNCOES DE VALUATION =====================
 def metodo_graham(lpa, crescimento):
-    return lpa * (8.5 + 2 * crescimento * 100)
+    return lpa * (8.5 + 2 * crescimento)
 
 def metodo_bazin(dividendos_ano, yield_desejado=YIELD_DESEJADO):
-    return dividendos_ano / yield_desejado
+    return dividendos_ano / yield_desejado if dividendos_ano else None
 
 def metodo_ddm(dividendos_ano, crescimento, taxa_desconto=TAXA_DESCONTO):
-    if taxa_desconto <= crescimento:
+    g = crescimento / 100
+    if taxa_desconto <= g or not dividendos_ano:
         return None
-    return dividendos_ano / (taxa_desconto - crescimento)
+    return dividendos_ano / (taxa_desconto - g)
 
 def metodo_valor_patrimonial(valor_patrimonial):
-    return valor_patrimonial
+    return valor_patrimonial if valor_patrimonial else None
 
 def metodo_multiplos(lpa, setor):
+    if not lpa:
+        return None
     multiplicador = MULTIPLOS_SETORIAIS.get(setor.lower(), MULTIPLOS_SETORIAIS['default'])
     return lpa * multiplicador
 
 def metodo_dcf(fcf_acao, crescimento, anos=5, taxa_desconto=TAXA_DESCONTO):
-    fcf_proj = [fcf_acao * ((1 + crescimento) ** i) for i in range(1, anos + 1)]
+    if not fcf_acao:
+        return None
+    g = crescimento / 100
+    fcf_proj = [fcf_acao * ((1 + g) ** i) for i in range(1, anos + 1)]
     valor_presente = sum([fcf / ((1 + taxa_desconto) ** i) for i, fcf in enumerate(fcf_proj, 1)])
-    valor_terminal = fcf_proj[-1] * (1 + crescimento) / (taxa_desconto - crescimento)
+    valor_terminal = fcf_proj[-1] * (1 + g) / (taxa_desconto - g)
     return valor_presente + valor_terminal / ((1 + taxa_desconto) ** anos)
 
 def sugestao_metodo(setor):
@@ -58,18 +64,20 @@ def get_comparaveis_setor(setor, exclude_ticker):
         try:
             info = yf.Ticker(t).info
             if info.get('sector', '').lower() == setor.lower() and t != exclude_ticker:
+                eps = info.get('trailingEps') or 0
+                preco = info.get('currentPrice') or 0
+                pl = preco / eps if eps else None
                 dados.append({
                     'Ticker': t,
                     'Setor': info.get('sector', ''),
-                    'LPA': info.get('trailingEps', 0),
-                    'Preço': info.get('currentPrice', 0),
-                    'P/L': info.get('currentPrice', 0) / info.get('trailingEps', 1)
+                    'LPA': eps,
+                    'Preço': preco,
+                    'P/L': pl
                 })
         except:
             pass
     return pd.DataFrame(dados)
 
-# ===================== PREÇO TETO / PRECIFICAÇÃO =====================
 def get_fundamentals(ticker):
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -78,7 +86,6 @@ def get_fundamentals(ticker):
     pb_ratio = info.get('priceToBook', None)
     eps = info.get('epsTrailingTwelveMonths', None)
     eps_growth = info.get('earningsQuarterlyGrowth', None)
-
     if eps_growth is not None:
         eps_growth *= 100
 
@@ -106,27 +113,34 @@ if ticker_input:
     info = ticker.info
 
     setor = info.get('sector', 'Desconhecido')
-    preco = info.get('currentPrice', 0)
-    lpa = info.get('trailingEps', 0)
-    dividendos = info.get('dividendRate', 0)
-    dy = info.get('dividendYield', 0) or 0
-    patrimonio = info.get('bookValue', 0)
-    acoes = info.get('sharesOutstanding', 1)
-    fcf_total = info.get('freeCashflow', 0) or 0
+    preco = info.get('currentPrice') or 0
+    lpa = info.get('trailingEps') or 0
+    dividendos = info.get('dividendRate') or 0
+    dy = info.get('dividendYield') or 0
+    patrimonio = info.get('bookValue') or 0
+    acoes = info.get('sharesOutstanding') or 1
+    fcf_total = info.get('freeCashflow') or 0
     fcf_acao = fcf_total / acoes if acoes > 0 else 0
 
     st.subheader("Resultado do Valuation")
     st.write("Setor:", setor)
     st.write("Preço atual:", f"R$ {preco:.2f}")
 
-    resultados = {
-        'Graham': metodo_graham(lpa, CRESCIMENTO),
-        'Bazin': metodo_bazin(dividendos),
-        'DDM': metodo_ddm(dividendos, CRESCIMENTO),
-        'Valor Patrimonial': metodo_valor_patrimonial(patrimonio),
-        'Múltiplos (P/L Setorial)': metodo_multiplos(lpa, setor),
-        'DCF': metodo_dcf(fcf_acao, CRESCIMENTO)
-    }
+    resultados = {}
+
+    if lpa:
+        resultados['Graham'] = metodo_graham(lpa, CRESCIMENTO)
+        resultados['Múltiplos (P/L Setorial)'] = metodo_multiplos(lpa, setor)
+
+    if dividendos:
+        resultados['Bazin'] = metodo_bazin(dividendos)
+        resultados['DDM'] = metodo_ddm(dividendos, CRESCIMENTO)
+
+    if patrimonio:
+        resultados['Valor Patrimonial'] = metodo_valor_patrimonial(patrimonio)
+
+    if fcf_acao:
+        resultados['DCF'] = metodo_dcf(fcf_acao, CRESCIMENTO)
 
     for nome, valor in resultados.items():
         if valor:
@@ -154,5 +168,4 @@ if ticker_input:
     st.write(f"Crescimento EPS: {eps_growth}%")
     st.write(f"Market Cap: {market_cap}")
     st.write(f"Dividend Yield: {dividend_yield}")
-    st.write(f"Preço Alvo Médio (analistas): {target_mean_price}")
-
+    st.write(f"Preço Alvo Médio (analistas - fonte: Yahoo Finance): {target_mean_price}")
