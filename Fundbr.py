@@ -36,6 +36,16 @@ RECOMENDACOES_POR_SETOR = {
     'default': ['Múltiplos (P/L)', 'Bazin']
 }
 
+# Métodos adicionais usados por investidores institucionais
+METODOS_INSTITUCIONAIS = {
+    'DCF (2 fases)': 'Fluxo de caixa descontado com duas fases de crescimento',
+    'Múltiplos (P/L)': 'Comparação com múltiplos setoriais ou históricos',
+    'Bazin': 'Baseado em dividend yield esperado',
+    'Patrimônio por Ação': 'Usado para setores financeiros ou empresas com ativos fortes',
+    'Análise de Sensibilidade': 'Testa diferentes premissas no DCF',
+    'Avaliação por EVA': 'Valor Econômico Adicionado, compara retorno com custo de capital'
+}
+
 def ajustar_taxa_desconto(setor):
     return WACC_POR_SETOR.get(setor.lower(), WACC_POR_SETOR['default'])
 
@@ -119,3 +129,7 @@ if ticker:
     st.subheader("🔎 Indicadores Recomendados para o Setor")
     recomendados = sugestao_metodo(setor)
     st.write(", ".join(recomendados))
+
+    st.subheader("📚 Métodos Utilizados por Investidores Institucionais")
+    for metodo, explicacao in METODOS_INSTITUCIONAIS.items():
+        st.write(f"- **{metodo}**: {explicacao}")
