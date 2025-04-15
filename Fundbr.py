@@ -1,5 +1,6 @@
 import streamlit as st
 import yfinance as yf
+import pandas as pd
 
 # ===================== AJUSTES DE PARÂMETROS POR SETOR =====================
 WACC_POR_SETOR = {
@@ -59,20 +60,24 @@ def dcf_duas_fases(fcf, crescimento_inicial, crescimento_perpetuo, anos, wacc):
 def metodo_multiplo_eps(eps, setor):
     return eps * ajustar_multiplo(setor)
 
-def metodo_bazin(dividendos_ano, setor):
-    return dividendos_ano / ajustar_yield(setor)
+def metodo_bazin(dividendos_series, setor, crescimento_proj=0.03):
+    ultimos_3_anos = dividendos_series[dividendos_series.index >= (pd.Timestamp.today() - pd.DateOffset(years=3))]
+    dividendos_anuais = ultimos_3_anos.resample('Y').sum()
+    media_3_anos = dividendos_anuais.mean()
+    
+    yield_desejado = ajustar_yield(setor)
+    preco_teto = media_3_anos / yield_desejado
+    
+    proximo_dividendo = media_3_anos * (1 + crescimento_proj)
+    preco_teto_proj = proximo_dividendo / yield_desejado
+    
+    return preco_teto, preco_teto_proj
 
-def calcular_preco_justo(dados, setor):
-    # Cálculo do preço justo com base em DCF (2 fases)
+def calcular_preco_justo(dados, setor, dividendos_series):
     preco_justo_dcf = dcf_duas_fases(dados['fcf_acao'], dados['crescimento'], dados['crescimento'] / 2, 5, ajustar_taxa_desconto(setor))
-    
-    # Cálculo com Múltiplos (P/L)
     preco_justo_pl = metodo_multiplo_eps(dados['lpa'], setor)
-    
-    # Cálculo com Bazin
-    preco_justo_bazin = metodo_bazin(dados['dividendos'], setor)
-    
-    return preco_justo_dcf, preco_justo_pl, preco_justo_bazin
+    preco_teto_bazin, preco_teto_proj = metodo_bazin(dividendos_series, setor, dados['crescimento'])
+    return preco_justo_dcf, preco_justo_pl, preco_teto_bazin, preco_teto_proj
 
 # ===================== COLETA DE DADOS =====================
 def get_dados(ticker):
@@ -101,28 +106,30 @@ def get_dados(ticker):
 # ===================== STREAMLIT APP =====================
 st.title("Valuation Profissional de Ações")
 
-ticker = st.text_input("Ticker da ação (ex: WEGE3.SA):")
+ticker = st.text_input("Ticker da ação (ex: BBAS3.SA):")
 if ticker:
     dados = get_dados(ticker)
     setor = dados['setor']
     preco_atual = dados['preco']
-    
-    # Cálculo de preço justo
-    preco_justo_dcf, preco_justo_pl, preco_justo_bazin = calcular_preco_justo(dados, setor)
+
+    yf_ticker = yf.Ticker(ticker)
+    dividends_series = yf_ticker.dividends
+
+    preco_justo_dcf, preco_justo_pl, preco_teto_bazin, preco_teto_proj = calcular_preco_justo(dados, setor, dividends_series)
     
     st.subheader("📊 Resultados do Valuation")
     st.write(f"**Setor**: {setor}")
     st.write(f"**Preço Atual**: R$ {preco_atual:.2f}")
 
-    # Exibição dos resultados dos métodos
     st.metric("Preço Justo - DCF (2 fases)", f"R$ {preco_justo_dcf:.2f}")
     st.metric("Preço Justo - Múltiplos (P/L)", f"R$ {preco_justo_pl:.2f}")
-    st.metric("Preço Justo - Bazin", f"R$ {preco_justo_bazin:.2f}")
+    st.metric("Preço Teto - Bazin (Histórico)", f"R$ {preco_teto_bazin:.2f}")
+    st.metric("Preço Teto - Bazin Projetivo", f"R$ {preco_teto_proj:.2f}")
     
-    # Exibição do preço alvo médio dos analistas
     if dados['target_price']:
         st.write(f"**Preço Alvo Médio (Analistas)**: R$ {dados['target_price']:.2f}")
 
     st.subheader("🔎 Indicadores Recomendados para o Setor")
     recomendados = sugestao_metodo(setor)
     st.write(", ".join(recomendados))
+    
